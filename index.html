@@ -2,7 +2,7 @@
 <html lang="id">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>MD2PDF — Konverter Markdown Profesional</title>
     <script src="https://cdn.jsdelivr.net/npm/marked@15.0.7/marked.min.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -43,13 +43,14 @@
 
         html {
             scroll-behavior: smooth;
+            height: 100%;
         }
 
         body {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
             background: var(--bg-primary);
             color: var(--text-primary);
-            min-height: 100vh;
+            height: 100vh;
             display: flex;
             flex-direction: column;
             overflow: hidden;
@@ -129,6 +130,7 @@
             position: sticky;
             top: 0;
             z-index: 100;
+            flex-shrink: 0;
             animation: slideDown 0.6s cubic-bezier(0.16, 1, 0.3, 1);
         }
 
@@ -215,6 +217,7 @@
             gap: 8px;
             position: relative;
             overflow: hidden;
+            white-space: nowrap;
         }
 
         .btn::after {
@@ -285,6 +288,7 @@
             flex-wrap: wrap;
             animation: slideDown 0.5s 0.1s both;
             z-index: 90;
+            flex-shrink: 0;
         }
 
         .toolbar-section {
@@ -349,7 +353,7 @@
             flex: 1;
             display: grid;
             grid-template-columns: 1fr 1fr;
-            overflow: hidden;
+            min-height: 0;
             position: relative;
             z-index: 2;
         }
@@ -360,6 +364,7 @@
             flex-direction: column;
             overflow: hidden;
             animation: panelSlideUp 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
+            min-height: 0;
         }
 
         .panel:first-child {
@@ -383,6 +388,7 @@
             align-items: center;
             justify-content: space-between;
             backdrop-filter: blur(10px);
+            flex-shrink: 0;
         }
 
         .panel-title {
@@ -432,6 +438,7 @@
             flex: 1;
             overflow-y: auto;
             position: relative;
+            min-height: 0;
         }
 
         .panel-divider {
@@ -463,7 +470,7 @@
         /* ===== EDITOR ===== */
         .editor {
             width: 100%;
-            height: 100%;
+            min-height: 100%;
             background: transparent;
             color: var(--text-primary);
             border: none;
@@ -685,17 +692,58 @@
 
         /* ===== RESPONSIVE ===== */
         @media (max-width: 768px) {
+            body {
+                height: auto;
+                min-height: 100vh;
+                overflow-y: auto;
+            }
+            
             .main {
                 grid-template-columns: 1fr;
-                grid-template-rows: 1fr 1fr;
+                grid-template-rows: 50vh 50vh;
+                min-height: calc(100vh - 120px);
             }
+            
+            .panel {
+                min-height: 0;
+                height: 100%;
+            }
+            
+            .panel-body {
+                overflow-y: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+            
             .panel-divider { display: none; }
-            .toolbar { padding: 10px 16px; }
-            .header { padding: 0 16px; height: 60px; }
+            .toolbar { 
+                padding: 10px 16px; 
+                gap: 8px;
+            }
+            .toolbar-section {
+                padding-right: 10px;
+            }
+            .header { 
+                padding: 0 16px; 
+                height: 60px; 
+            }
             .logo-text { font-size: 16px; }
-            .btn { padding: 8px 14px; font-size: 13px; }
+            .btn { 
+                padding: 8px 14px; 
+                font-size: 13px; 
+            }
+            .btn span:not(.btn-icon) {
+                display: none;
+            }
             .preview { padding: 20px; }
             .editor { padding: 20px; }
+            .toast-container {
+                right: 16px;
+                left: 16px;
+                bottom: 16px;
+            }
+            .toast {
+                max-width: 100%;
+            }
         }
 
         /* ===== PRINT STYLES ===== */
@@ -1029,10 +1077,10 @@
         <div class="header-actions">
             <input type="file" id="fileInput" accept=".md,.markdown,.txt" style="display: none;">
             <button class="btn btn-secondary" onclick="document.getElementById('fileInput').click()">
-                <span class="btn-icon">📂</span> Buka File
+                <span class="btn-icon">📂</span> <span>Masukan File</span>
             </button>
             <button class="btn btn-primary" id="exportBtn" onclick="exportPDF()">
-                <span class="btn-icon">📄</span> Export PDF
+                <span class="btn-icon">📄</span> <span>Export PDF</span>
             </button>
         </div>
     </header>
@@ -1064,10 +1112,10 @@
         </div>
         <div class="toolbar-section">
             <button class="btn btn-secondary" onclick="loadExample()" style="font-size: 13px; padding: 8px 16px;">
-                <span class="btn-icon">✨</span> Contoh
+                <span class="btn-icon">✨</span> <span>Contoh</span>
             </button>
             <button class="btn btn-secondary" onclick="clearAll()" style="font-size: 13px; padding: 8px 16px;">
-                <span class="btn-icon">🗑️</span> Hapus
+                <span class="btn-icon">🗑️</span> <span>Hapus</span>
             </button>
         </div>
     </div>
@@ -1252,7 +1300,7 @@
 
             // Show loading state
             const originalBtnContent = exportBtn.innerHTML;
-            exportBtn.innerHTML = '<div class="spinner"></div> Memproses...';
+            exportBtn.innerHTML = '<div class="spinner"></div> <span>Memproses...</span>';
             exportBtn.disabled = true;
 
             const html = marked.parse(editor.value);
