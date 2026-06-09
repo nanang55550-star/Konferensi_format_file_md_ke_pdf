@@ -1113,6 +1113,11 @@ function smartBreaks(rawHtml) {
   root.querySelectorAll('pre, blockquote, figure').forEach(el => {
     el.classList.add('avoid-break')
   })
+  // Short lists must not split — prevents orphan bullets
+  root.querySelectorAll('ul, ol').forEach(list => {
+    if (list.querySelectorAll('li').length <= 10)
+      list.classList.add('avoid-break')
+  })
 
   // ── Pass 2: wrap heading + lead siblings ───────────────────
   let i = 0
@@ -1132,7 +1137,12 @@ function smartBreaks(rawHtml) {
     sb.appendChild(el)          // heading moves into sb
 
     // How many following siblings to pull in
-    const pull   = level <= 2 ? 4 : level <= 4 ? 3 : 2
+    // h1/h2 → pull only 1: major sections can be many pages; large
+    // wrapped blocks get pushed whole to next page → huge blank gaps.
+    // CSS page-break-after:avoid on the heading alone is enough.
+    // h3/h4 → pull 3: sub-sections are compact; keep them with content.
+    // h5/h6 → pull 2: micro-sections.
+    const pull   = level <= 2 ? 1 : level <= 4 ? 3 : 2
     let   taken  = 0
 
     while (taken < pull && sb.nextSibling) {
@@ -1247,12 +1257,17 @@ async function convert(){
 
   /* ── Section blocks (injected by smartBreaks) ──────────── */
   /*
-   * .sb wraps a heading + its first N siblings.
-   * page-break-inside:avoid tells html2pdf: if this block would
-   * be cut by a page boundary, push the entire block to the
-   * top of the next page instead. This is the core fix.
+   * h1/h2 blocks (.sb1/.sb2): NO avoid-inside.
+   *   Major sections can span many pages. Applying avoid-inside here
+   *   would push the entire chapter to the next page, leaving large
+   *   blank gaps. CSS page-break-after:avoid on the heading itself
+   *   is sufficient to prevent orphan h1/h2 headings.
+   *
+   * h3+ blocks (.sb3–.sb6): avoid-inside applied.
+   *   Sub-sections are compact (heading + a few paragraphs/bullets).
+   *   Keeping them together prevents sub-heading orphans.
    */
-  .sb {
+  .sb3, .sb4, .sb5, .sb6 {
     page-break-inside: avoid;
     break-inside:      avoid;
   }
@@ -1330,7 +1345,7 @@ ${pnumHtml}
     //            html2pdf inserts a break BEFORE it (not inside it)
     pagebreak: {
       mode:  ['css', 'legacy'],
-      avoid: ['.sb', '.avoid-break']
+      avoid: ['.sb3', '.sb4', '.sb5', '.sb6', '.avoid-break']
     }
   }
 
