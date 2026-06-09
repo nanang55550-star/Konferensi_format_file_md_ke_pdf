@@ -1072,6 +1072,90 @@ bindChips('cg-pnum',    'pageNums',v=>v==='yes')
 document.getElementById('btn-go').addEventListener('click', convert)
 document.getElementById('btn-rst').addEventListener('click', clear)
 
+/* ══════════════════════════════════════════════════════════════
+ * smartBreaks(rawHtml)
+ *
+ * Solves "orphan heading" — heading stranded alone at the bottom
+ * of a page while its content starts on the next page.
+ *
+ * Algorithm (2-pass DOM surgery):
+ *
+ * Pass 1 — Mark atomic elements that must never split:
+ *   • Tables with ≤16 rows  → .avoid-break
+ *   • <pre>, <blockquote>   → .avoid-break
+ *
+ * Pass 2 — Wrap each heading with its "lead" siblings:
+ *   For every <h1>–<h6> found as a direct child of the root:
+ *   1. Insert <div class="sb sbN"> immediately before it.
+ *   2. Move the heading inside the wrapper.
+ *   3. Pull the next N following siblings into the wrapper too,
+ *      stopping early if a heading of equal/higher rank appears
+ *      (so sections are never accidentally merged).
+ *      Pull count: h1/h2 → 4  |  h3/h4 → 3  |  h5/h6 → 2
+ *
+ *   Result: each .sb block holds a heading + its intro content.
+ *   CSS `page-break-inside:avoid` on .sb ensures html2pdf pushes
+ *   the whole block to the next page instead of splitting it.
+ *
+ * html2pdf pagebreak config:
+ *   mode: ['css','legacy']  — respect CSS properties + heuristic
+ *   avoid: ['.sb','.avoid-break']  — never cut these selectors
+ * ══════════════════════════════════════════════════════════════ */
+function smartBreaks(rawHtml) {
+  const root = document.createElement('div')
+  root.innerHTML = rawHtml
+
+  // ── Pass 1: atomic blocks ──────────────────────────────────
+  root.querySelectorAll('table').forEach(tbl => {
+    if (tbl.querySelectorAll('tr').length <= 16)
+      tbl.classList.add('avoid-break')
+  })
+  root.querySelectorAll('pre, blockquote, figure').forEach(el => {
+    el.classList.add('avoid-break')
+  })
+
+  // ── Pass 2: wrap heading + lead siblings ───────────────────
+  let i = 0
+  while (i < root.children.length) {
+    const el  = root.children[i]
+    const tag = el.tagName
+
+    // Skip non-headings
+    if (!tag || !/^H[1-6]$/.test(tag)) { i++; continue }
+
+    const level = parseInt(tag[1])
+    const sb    = document.createElement('div')
+    sb.className = `sb sb${level}`
+
+    // Insert wrapper BEFORE the heading; heading is still at i+1
+    root.insertBefore(sb, el)  // sb is now at index i
+    sb.appendChild(el)          // heading moves into sb
+
+    // How many following siblings to pull in
+    const pull   = level <= 2 ? 4 : level <= 4 ? 3 : 2
+    let   taken  = 0
+
+    while (taken < pull && sb.nextSibling) {
+      const nxt = sb.nextSibling
+
+      // Stop: heading of same or higher rank
+      if (nxt.nodeType === 1 && /^H[1-6]$/.test(nxt.tagName))
+        if (parseInt(nxt.tagName[1]) <= level) break
+
+      // Stop: already-wrapped section block
+      if (nxt.nodeType === 1 && nxt.className &&
+          /^sb\b/.test(nxt.className)) break
+
+      sb.appendChild(nxt)
+      taken++
+    }
+
+    i++ // sb is now at old index i; advance past it
+  }
+
+  return root.innerHTML
+}
+
 async function convert(){
   if(!S.content){ toast('Tidak ada file yang dimuat','err'); return }
 
@@ -1093,127 +1177,161 @@ async function convert(){
   lbl.textContent = 'Memproses...'
   ptrack.classList.add('show')
 
-  // Animate progress (fake)
+  // Fake progress animation
   let p = 0
   const ticker = setInterval(()=>{
-    p = Math.min(p + Math.random()*14, 82)
+    p = Math.min(p + Math.random()*13, 80)
     pfill.style.width = p+'%'
   }, 220)
 
   toast('Membangun PDF...', 'info', 2500)
 
-  // ── Build PDF HTML ──
-  const isDark  = S.theme === 'dark'
-  const bg      = isDark ? '#0f111a' : '#ffffff'
-  const fg      = isDark ? '#dde1ff' : '#1a1a2e'
-  const h1c     = isDark ? '#ffffff' : '#1a1a2e'
-  const h2c     = isDark ? '#c4caff' : '#1a1a2e'
-  const h3c     = isDark ? '#818cf8' : '#4f46e5'
-  const codeBg  = isDark ? '#1e2133' : '#f3f4f6'
-  const codeClr = isDark ? '#a5b4fc' : '#4f46e5'
-  const tbhBg   = isDark ? '#6366f1' : '#6366f1'
-  const brdClr  = isDark ? '#2a2d4a' : '#e4e4e7'
-  const trEvenBg= isDark ? '#161928' : '#f9f9ff'
-  const preBg   = isDark ? '#1e2133' : '#f8f9fa'
-  const bqBg    = isDark ? 'rgba(99,102,241,.12)' : '#f5f5ff'
-  const bqFg    = isDark ? '#9098bf' : '#555'
+  // ── Palette ──────────────────────────────────────────────
+  const isDark   = S.theme === 'dark'
+  const bg       = isDark ? '#0f111a' : '#ffffff'
+  const fg       = isDark ? '#dde1ff' : '#1a1a2e'
+  const h1c      = isDark ? '#ffffff' : '#1a1a2e'
+  const h2c      = isDark ? '#c4caff' : '#1a1a2e'
+  const h3c      = isDark ? '#818cf8' : '#4f46e5'
+  const codeBg   = isDark ? '#1e2133' : '#f3f4f6'
+  const codeClr  = isDark ? '#a5b4fc' : '#4f46e5'
+  const brdClr   = isDark ? '#2a2d4a' : '#e4e4e7'
+  const trEvenBg = isDark ? '#161928' : '#f9f9ff'
+  const preBg    = isDark ? '#1e2133' : '#f8f9fa'
+  const bqBg     = isDark ? 'rgba(99,102,241,.12)' : '#f5f5ff'
+  const bqFg     = isDark ? '#9098bf' : '#555'
 
   const pnumHtml = S.pageNums
-    ? `<div style="position:fixed;bottom:16px;right:20px;font-size:9pt;
-          color:${isDark?'#666':'#aaa'};font-family:Arial">
-         <span class="pageNumber"></span> / <span class="totalPages"></span>
+    ? `<div style="position:fixed;bottom:14px;right:18px;font-size:9pt;
+          color:${isDark?'#555':'#aaa'};font-family:Arial,sans-serif">
+         <span class="pageNumber"></span>&nbsp;/&nbsp;<span class="totalPages"></span>
        </div>`
     : ''
 
-  const html = marked.parse(S.content)
+  // ── Parse Markdown → smart-wrapped HTML ──────────────────
+  const processedHtml = smartBreaks(marked.parse(S.content))
 
   const pdfHtml = `
 <style>
-  @page { size: ${paper} ${S.orientation}; margin: ${margin}mm; }
+  @page { size:${paper} ${S.orientation}; margin:${margin}mm; }
   * { box-sizing:border-box; }
+
   body {
     font-family: Georgia, 'Times New Roman', serif;
-    font-size: 12.5pt; line-height: 1.82;
+    font-size: 12.5pt; line-height: 1.85;
     color: ${fg}; background: ${bg};
-    margin: 0; padding: 0;
+    margin:0; padding:0;
   }
-  h1,h2,h3,h4,h5,h6 {
+
+  /* ── Headings: never orphaned at page bottom ──────────── */
+  h1, h2, h3, h4, h5, h6 {
     font-family: Arial, Helvetica, sans-serif;
-    page-break-after: avoid;
+    page-break-after: avoid;   /* CSS Level 2 */
+    break-after:      avoid;   /* CSS Level 3 */
+    orphans: 4;
+    widows:  4;
   }
   h1 {
-    font-size: 2em; color: ${h1c};
-    border-bottom: 2.5px solid #6366f1;
-    padding-bottom: .3em; margin: .6em 0 .5em;
+    font-size:2em; color:${h1c};
+    border-bottom:2.5px solid #6366f1;
+    padding-bottom:.3em; margin:.6em 0 .5em;
+    page-break-before: auto;
   }
   h2 {
-    font-size: 1.48em; color: ${h2c};
-    border-bottom: 1px solid ${brdClr};
-    padding-bottom: .2em; margin: 1.4em 0 .5em;
+    font-size:1.48em; color:${h2c};
+    border-bottom:1px solid ${brdClr};
+    padding-bottom:.2em; margin:1.4em 0 .5em;
   }
   h3 { font-size:1.18em; color:${h3c}; margin:1.2em 0 .4em; }
-  h4 { font-size:1em; color:${fg}; margin:1em 0 .35em; }
-  p  { margin:0 0 .85em; }
-  ul,ol { padding-left:1.6em; margin:0 0 .85em; }
+  h4 { font-size:1em;    color:${fg};  margin:1em  0 .35em; }
+
+  /* ── Section blocks (injected by smartBreaks) ──────────── */
+  /*
+   * .sb wraps a heading + its first N siblings.
+   * page-break-inside:avoid tells html2pdf: if this block would
+   * be cut by a page boundary, push the entire block to the
+   * top of the next page instead. This is the core fix.
+   */
+  .sb {
+    page-break-inside: avoid;
+    break-inside:      avoid;
+  }
+
+  /* ── Atomic elements (injected by smartBreaks Pass 1) ──── */
+  .avoid-break {
+    page-break-inside: avoid;
+    break-inside:      avoid;
+  }
+
+  /* ── Body content ──────────────────────────────────────── */
+  p  { margin:0 0 .85em; orphans:3; widows:3; }
+  ul, ol { padding-left:1.6em; margin:0 0 .85em; }
   li { margin-bottom:.3em; }
   a  { color:#6366f1; text-decoration:none; border-bottom:1px dotted #6366f1; }
   strong { font-weight:700; }
-  em { font-style:italic; }
+  em     { font-style:italic; }
+
   code {
-    font-family: 'Courier New', Courier, monospace;
-    font-size: .86em;
-    background: ${codeBg}; color: ${codeClr};
-    padding: 2px 5px; border-radius: 3px;
+    font-family:'Courier New',Courier,monospace;
+    font-size:.86em;
+    background:${codeBg}; color:${codeClr};
+    padding:2px 5px; border-radius:3px;
   }
   pre {
-    background: ${preBg};
-    border: 1px solid ${brdClr};
-    border-radius: 6px; padding: 1em 1.1em;
-    overflow-x: auto; margin: 0 0 1em;
-    page-break-inside: avoid;
+    background:${preBg}; border:1px solid ${brdClr};
+    border-radius:6px; padding:1em 1.1em;
+    overflow-x:auto; margin:0 0 1em;
   }
-  pre code {
-    background: none; padding: 0;
-    color: ${isDark?'#9ab':'#333'};
-    font-size: .84em;
-  }
+  pre code { background:none; padding:0; color:${isDark?'#9ab':'#333'}; font-size:.84em; }
+
   blockquote {
-    border-left: 4px solid #6366f1;
-    margin: 0 0 1em; padding: .55em 1em;
-    background: ${bqBg}; color: ${bqFg};
-    font-style: italic; border-radius: 0 5px 5px 0;
+    border-left:4px solid #6366f1;
+    margin:0 0 1em; padding:.55em 1em;
+    background:${bqBg}; color:${bqFg};
+    font-style:italic; border-radius:0 5px 5px 0;
   }
-  table {
-    width: 100%; border-collapse: collapse;
-    margin: 0 0 1em; page-break-inside: avoid;
-  }
+
+  /* Tables: page-break handled by .avoid-break class */
+  table { width:100%; border-collapse:collapse; margin:0 0 1em; }
   th {
-    background: ${tbhBg}; color: #fff;
-    padding: 8px 12px; text-align: left;
-    font-family: Arial; font-size: .84em;
-    text-transform: uppercase; letter-spacing: .04em;
+    background:#6366f1; color:#fff;
+    padding:8px 12px; text-align:left;
+    font-family:Arial; font-size:.84em;
+    text-transform:uppercase; letter-spacing:.04em;
   }
-  td { padding: 8px 12px; border-bottom: 1px solid ${brdClr}; }
-  tr:nth-child(even) td { background: ${trEvenBg}; }
-  hr { border: none; border-top: 1px solid ${brdClr}; margin: 1.4em 0; }
-  img { max-width: 100%; height: auto; border-radius: 5px; }
+  td { padding:8px 12px; border-bottom:1px solid ${brdClr}; }
+  tr:nth-child(even) td { background:${trEvenBg}; }
+
+  hr  { border:none; border-top:1px solid ${brdClr}; margin:1.4em 0; }
+  img { max-width:100%; height:auto; border-radius:5px; }
 </style>
 ${pnumHtml}
-<div class="md-body">${html}</div>`
+<div class="md-body">${processedHtml}</div>`
 
   const wrap = document.getElementById('pdf-out')
   wrap.innerHTML = pdfHtml
   wrap.style.display = 'block'
 
-  // slight delay for render
-  await new Promise(res=>setTimeout(res,120))
+  // Give browser a tick to lay out the injected DOM
+  await new Promise(res=>setTimeout(res, 150))
 
   const opt = {
     margin:     [margin, margin, margin, margin],
     filename:   fname + '.pdf',
     image:      { type:'jpeg', quality: S.quality },
     html2canvas:{ scale: S.scale, useCORS:true, backgroundColor: bg, logging:false },
-    jsPDF:      { unit:'mm', format: paper, orientation: S.orientation, compress:true }
+    jsPDF:      { unit:'mm', format: paper, orientation: S.orientation, compress:true },
+
+    // ── Page-break directives ────────────────────────────
+    // 'css'    → honour page-break-* / break-* CSS properties
+    // 'legacy' → html2pdf built-in image-slice heuristic (fallback)
+    // avoid    → selectors that must never be split across pages;
+    //            if the element doesn't fit at the page bottom,
+    //            html2pdf inserts a break BEFORE it (not inside it)
+    pagebreak: {
+      mode:  ['css', 'legacy'],
+      avoid: ['.sb', '.avoid-break']
+    }
   }
 
   try {
@@ -1222,14 +1340,15 @@ ${pnumHtml}
     clearInterval(ticker)
     pfill.style.width = '100%'
     setTimeout(()=>{ ptrack.classList.remove('show'); pfill.style.width='0%' }, 900)
-
     toast(`✓ PDF "<strong>${fname}.pdf</strong>" berhasil diunduh!`, 'ok', 4500)
+
   } catch(err){
     clearInterval(ticker)
     ptrack.classList.remove('show')
     pfill.style.width = '0%'
     toast('Konversi gagal: '+err.message, 'err', 5000)
     console.error(err)
+
   } finally {
     wrap.style.display = 'none'
     wrap.innerHTML = ''
